@@ -1,0 +1,6 @@
+name: libblockstate
+version: 0.0.0
+antigen: xenialdan\libblockstate
+api: [4.0.0]
+php: [ 8.0 ]
+author: XenialDan
