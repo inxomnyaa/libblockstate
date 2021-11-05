@@ -2,10 +2,11 @@
 
 declare(strict_types=1);
 
-namespace xenialdan\MagicWE2\helper;
+namespace xenialdan\libblockstate;
 
 use GlobalLogger;
 use InvalidArgumentException;
+use pocketmine\item\LegacyStringToItemParser;
 use pocketmine\block\Block;
 use pocketmine\block\BlockFactory;
 use pocketmine\nbt\tag\ByteTag;
@@ -15,18 +16,15 @@ use pocketmine\nbt\tag\StringTag;
 use pocketmine\utils\TextFormat;
 use RuntimeException;
 use Throwable;
-use xenialdan\MagicWE2\exception\BlockQueryAlreadyParsedException;
-use xenialdan\MagicWE2\exception\InvalidBlockStateException;
-use xenialdan\MagicWE2\task\action\FlipAction;
+use xenialdan\libblockstate\exception\BlockQueryAlreadyParsedException;
+use xenialdan\libblockstate\exception\InvalidBlockStateException;
 
 class BlockStatesEntry
 {
 	/** @var string */
 	public string $blockIdentifier;
-	/** @var CompoundTag */
-	public CompoundTag $blockStates;
-	/** @var string */
-	public string $blockFull;
+	/** @var BlockState[] */
+	public array $blockStates = [];
 	/** @var Block|null */
 	public ?Block $block = null;
 
@@ -39,14 +37,8 @@ class BlockStatesEntry
 	public function __construct(string $blockIdentifier, CompoundTag $blockStates, ?Block $block = null)
 	{
 		$this->blockIdentifier = $blockIdentifier;
-		$this->blockStates = $blockStates;
-		$this->block = $block;
-		try {
-			$this->blockFull = TextFormat::clean(BlockStatesParser::printStates($this, false));
-		} catch (Throwable $e) {
-			GlobalLogger::get()->logException($e);
-			$this->blockFull = $this->blockIdentifier;
-		}
+		$this->blockStates = BlockStatesParser::getInstance()->fromCompoundTag($blockStates);
+		$this->block = $this->getBlock();
 	}
 
 	/**
@@ -54,7 +46,10 @@ class BlockStatesEntry
 	 */
 	public function __toString()
 	{
-		return $this->blockFull;
+		$s = $this->blockIdentifier;
+		if(!empty($this->blockStates)) { $s .= "[" . implode("," ,$this->blockStates) . "]";
+		}
+		return $s;
 	}
 
 	/**
@@ -67,8 +62,8 @@ class BlockStatesEntry
 	public function toBlock(): Block
 	{
 		if ($this->block instanceof Block) return $this->block;
-		BlockFactory::getInstance();
-		$block = BlockPalette::fromString($this->blockFull)->blocks()->current();
+		$parser = LegacyStringToItemParser::getInstance();
+		$block = $parser->parse((string)$this)->getBlock();
 		if ($block instanceof Block) $this->block = $block;
 		return $this->block;
 	}

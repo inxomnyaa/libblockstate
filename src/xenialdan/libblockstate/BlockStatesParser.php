@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace xenialdan\MagicWE2\helper;
+namespace xenialdan\libblockstate;
 
 use Closure;
 use Exception;
@@ -38,8 +38,7 @@ use pocketmine\utils\TextFormat as TF;
 use pocketmine\world\Position;
 use RuntimeException;
 use Webmozart\PathUtil\Path;
-use xenialdan\MagicWE2\exception\InvalidBlockStateException;
-use xenialdan\MagicWE2\Loader;
+use xenialdan\libblockstate\exception\InvalidBlockStateException;
 use function array_key_exists;
 use function file_get_contents;
 use const pocketmine\RESOURCE_PATH;
@@ -53,7 +52,7 @@ final class BlockStatesParser
 	/** @var string */
 	public static string $doorRotPath = "";
 
-	/** @var R12ToCurrentBlockMapEntry[][] *///TODO check type correct? phpstan!
+	/** @var BlockState[] *///TODO check type correct? phpstan!
 	private static array $legacyStateMap;
 
 	/** @var array */
@@ -74,22 +73,39 @@ final class BlockStatesParser
 
 	private function loadLegacyMappings(): void
 	{
-		self::$legacyStateMap = [];
-		$contents = file_get_contents(RESOURCE_PATH . "vanilla/r12_to_current_block_map.bin");
-		if ($contents === false) throw new PluginException("Can not get contents of r12_to_current_block_map");
-		$legacyStateMapReader = PacketSerializer::decoder(file_get_contents(Path::join(RESOURCE_PATH, "vanilla", "r12_to_current_block_map.bin")), 0, new PacketSerializerContext(GlobalItemTypeDictionary::getInstance()->getDictionary()));
+	  /** @var BlockState[] $legacyStateMap */
+		$legacyStateMap = [];
+		$legacyStateMapReader = PacketSerializer::decoder(file_get_contents(Path::join(\pocketmine\BEDROCK_DATA_PATH, "r12_to_current_block_map.bin")), 0, new PacketSerializerContext(GlobalItemTypeDictionary::getInstance()->getDictionary()));
 		$nbtReader = new NetworkNbtSerializer();
+		//$blockFactory = BlockFactory::getInstance();
 		while (!$legacyStateMapReader->feof()) {
 			$id = $legacyStateMapReader->getString();
-			$meta = $legacyStateMapReader->getLShort();
+			$meta = $legacyStateMapReader->getLShort()
+			$fullId = ($id << Block::INTERNAL_METADATA_BITS) | $meta;
 
 			$offset = $legacyStateMapReader->getOffset();
-			$state = $nbtReader->read($legacyStateMapReader->getBuffer(), $offset)->mustGetCompoundTag();
+			$stateTag = $nbtReader->read($legacyStateMapReader->getBuffer(), $offset)->mustGetCompoundTag();
+			self::$legacyStateMap[$id][$meta] = new BlockState($fullId, new R12ToCurrentBlockMapEntry($id, $meta, $stateTag));
+			var_dump($this->get($id,$meta));
 			$legacyStateMapReader->setOffset($offset);
-			$r12ToCurrentBlockMapEntry = new R12ToCurrentBlockMapEntry($id, $meta, $state);
-			self::$legacyStateMap[$id][$meta] = $r12ToCurrentBlockMapEntry;
 		}
 		ksort(self::$legacyStateMap, SORT_NUMERIC);
+	}
+	
+	public function get(int $id, int $meta):BlockState{
+	  return self::$legacyStateMap[$id, $meta];
+	}
+	
+	public function getDefault(int $id):BlockState{
+	  return reset(self::$legacyStateMap[$id]);
+	}
+	
+	public function isDefault(BlockState $state):bool{
+	  return $state->equals($this->getDefault($state->state->getId()));
+	}
+	
+		public function getFromBlock(Block $block):BlockState{
+	  return $this->get($block->getId(), $block->getMeta());
 	}
 
 	/**

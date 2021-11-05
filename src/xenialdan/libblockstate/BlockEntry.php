@@ -59,7 +59,7 @@ class BlockEntry
 	public static function fromBlock(Block $block): self
 	{
 		BlockFactory::getInstance();
-		return new BlockEntry($block->getFullId());
+		return new BlockEntry($block->getFullId());//todo states
 	}
 
 }
