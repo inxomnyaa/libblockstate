@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace xenialdan\MagicWE2\helper;
+namespace xenialdan\libblockstate;
 
 use InvalidArgumentException;
 use pocketmine\block\utils\InvalidBlockStateException;
 use pocketmine\item\LegacyStringToItemParserException;
 use pocketmine\nbt\NbtException;
 use pocketmine\nbt\UnexpectedTagTypeException;
-use xenialdan\MagicWE2\exception\BlockQueryAlreadyParsedException;
+use xenialdan\libblockstate\exception\BlockQueryAlreadyParsedException;
 use function preg_match_all;
 use const PREG_SET_ORDER;
 
