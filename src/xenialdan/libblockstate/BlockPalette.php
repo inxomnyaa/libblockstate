@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace xenialdan\MagicWE2\helper;
+namespace xenialdan\libblockstate;
 
 use Generator;
 use InvalidArgumentException;
@@ -18,9 +18,7 @@ use pocketmine\nbt\NbtException;
 use pocketmine\nbt\tag\CompoundTag;
 use pocketmine\nbt\UnexpectedTagTypeException;
 use pocketmine\utils\TextFormat as TF;
-use xenialdan\MagicWE2\API;
-use xenialdan\MagicWE2\exception\BlockQueryAlreadyParsedException;
-use xenialdan\MagicWE2\Loader;
+use xenialdan\libblockstate\exception\BlockQueryAlreadyParsedException;
 use const JSON_THROW_ON_ERROR;
 
 class BlockPalette
