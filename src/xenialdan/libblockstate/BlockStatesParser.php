@@ -93,7 +93,7 @@ final class BlockStatesParser
 	}
 	
 	public function get(int $id, int $meta):BlockState{
-	  return self::$legacyStateMap[$id, $meta];
+	  return self::$legacyStateMap[$id][$meta];
 	}
 	
 	public function getDefault(int $id):BlockState{
@@ -106,6 +106,11 @@ final class BlockStatesParser
 	
 		public function getFromBlock(Block $block):BlockState{
 	  return $this->get($block->getId(), $block->getMeta());
+	}
+	
+	public function getMergedState(BlockState $state):BlockState{
+	  $states = $this->getDefault($state->state->getId())->state->getBlockState()->merge($state->state->getBlockState());
+	  return new BlockState($this->fullId, new R12ToCurrentBlockMapEntry($id, $meta, $states));
 	}
 
 	/**
@@ -199,6 +204,7 @@ final class BlockStatesParser
 	 * @param Block $block
 	 * @return string|null
 	 */
+	 //todo static?
 	public static function getBlockIdMapName(Block $block): ?string
 	{
 		return LegacyBlockIdToStringIdMap::getInstance()->legacyToString($block->getId());
@@ -209,6 +215,7 @@ final class BlockStatesParser
 	 * @return CompoundTag
 	 * @throws UnexpectedTagTypeException
 	 */
+	 //todo static?
 	protected static function getDefaultStates(string $blockIdentifier): CompoundTag
 	{
 		return self::$legacyStateMap[$blockIdentifier][0]->getBlockState()->getCompoundTag('states') ?? new CompoundTag();
@@ -226,6 +233,7 @@ final class BlockStatesParser
 	 * @throws NbtException
 	 * @noinspection PhpInternalEntityUsedInspection
 	 */
+	 //todo static?
 	public static function fromString(BlockQuery $query): Block
 	{
 		$namespacedSelectedBlockName = !str_contains($query->blockId, "minecraft:") ? "minecraft:" . $query->blockId : $query->blockId;
@@ -269,6 +277,7 @@ final class BlockStatesParser
 			if ($tag === null) {
 				throw new InvalidBlockStateException("Default states for block '$query->blockId' do not contain Tag with name '$stateName'");
 			}
+			//todo use match
 			if ($tag instanceof StringTag) {
 				$finalStatesList->setString($stateName, $value);
 			} else if ($tag instanceof IntTag) {
