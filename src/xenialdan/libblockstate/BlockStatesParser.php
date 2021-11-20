@@ -8,7 +8,6 @@ use Closure;
 use Exception;
 use GlobalLogger;
 use InvalidArgumentException;
-use InvalidStateException;
 use JsonException;
 use pocketmine\block\Block;
 use pocketmine\block\BlockFactory;
@@ -18,6 +17,7 @@ use pocketmine\data\bedrock\LegacyBlockIdToStringIdMap;
 use pocketmine\item\LegacyStringToItemParserException;
 use pocketmine\item\StringToItemParser;
 use pocketmine\math\Facing;
+use pocketmine\nbt\NBT;
 use pocketmine\nbt\NbtException;
 use pocketmine\nbt\tag\ByteTag;
 use pocketmine\nbt\tag\CompoundTag;
@@ -32,16 +32,19 @@ use pocketmine\network\mcpe\protocol\serializer\PacketSerializerContext;
 use pocketmine\plugin\PluginException;
 use pocketmine\Server;
 use pocketmine\utils\AssumptionFailedError;
-use pocketmine\utils\Config;
 use pocketmine\utils\SingletonTrait;
 use pocketmine\utils\TextFormat as TF;
 use pocketmine\world\Position;
 use RuntimeException;
 use Webmozart\PathUtil\Path;
 use xenialdan\libblockstate\exception\InvalidBlockStateException;
+use xenialdan\MagicWE2\Loader;
 use function array_key_exists;
+use function explode;
 use function file_get_contents;
-use const pocketmine\RESOURCE_PATH;
+use function var_dump;
+use const PHP_EOL;
+use const pocketmine\BEDROCK_DATA_PATH;
 
 final class BlockStatesParser
 {
@@ -53,7 +56,7 @@ final class BlockStatesParser
 	public static string $doorRotPath = "";
 
 	/** @var BlockState[] *///TODO check type correct? phpstan!
-	private static array $legacyStateMap;
+	private static array $legacyStateMap = [];
 
 	/** @var array */
 	private static array $aliasMap = [];
@@ -64,53 +67,132 @@ final class BlockStatesParser
 
 	private function __construct()
 	{
-		$this->loadRotationAndFlipData(Loader::getRotFlipPath());
-		$this->loadDoorRotationAndFlipData(Loader::getDoorRotFlipPath());
+		/*$this->loadRotationAndFlipData(Loader::getRotFlipPath());
+		$this->loadDoorRotationAndFlipData(Loader::getDoorRotFlipPath());*/
 		//$this->loadRotationAndFlipData(self::$rotPath);
 		//$this->loadDoorRotationAndFlipData(self::$doorRotPath);
 		$this->loadLegacyMappings();
+		$this->runTest();
 	}
 
 	private function loadLegacyMappings(): void
 	{
-	  /** @var BlockState[] $legacyStateMap */
-		$legacyStateMap = [];
-		$legacyStateMapReader = PacketSerializer::decoder(file_get_contents(Path::join(\pocketmine\BEDROCK_DATA_PATH, "r12_to_current_block_map.bin")), 0, new PacketSerializerContext(GlobalItemTypeDictionary::getInstance()->getDictionary()));
+		$legacyIdMap = LegacyBlockIdToStringIdMap::getInstance();
+		$legacyStateMapReader = PacketSerializer::decoder(file_get_contents(Path::join(BEDROCK_DATA_PATH, "r12_to_current_block_map.bin")), 0, new PacketSerializerContext(GlobalItemTypeDictionary::getInstance()->getDictionary()));
 		$nbtReader = new NetworkNbtSerializer();
-		//$blockFactory = BlockFactory::getInstance();
 		while (!$legacyStateMapReader->feof()) {
-			$id = $legacyStateMapReader->getString();
-			$meta = $legacyStateMapReader->getLShort()
+			$blockId = $legacyStateMapReader->getString();
+			$meta = $legacyStateMapReader->getLShort();
+
+			$id = $legacyIdMap->stringToLegacy($blockId);
+			if ($id === null) {
+				throw new RuntimeException("No legacy ID matches " . $blockId);
+			}
 			$fullId = ($id << Block::INTERNAL_METADATA_BITS) | $meta;
 
 			$offset = $legacyStateMapReader->getOffset();
 			$stateTag = $nbtReader->read($legacyStateMapReader->getBuffer(), $offset)->mustGetCompoundTag();
-			self::$legacyStateMap[$id][$meta] = new BlockState($fullId, new R12ToCurrentBlockMapEntry($id, $meta, $stateTag));
-			var_dump($this->get($id,$meta));
 			$legacyStateMapReader->setOffset($offset);
+			self::$legacyStateMap[$id][$meta] = $blockState = new BlockState($fullId, new R12ToCurrentBlockMapEntry($blockId, $meta, $stateTag));
+			print("$id:$meta" . $blockState) . PHP_EOL;
 		}
 		ksort(self::$legacyStateMap, SORT_NUMERIC);
 	}
-	
-	public function get(int $id, int $meta):BlockState{
-	  return self::$legacyStateMap[$id][$meta];
+
+	private function runTest(): void
+	{
+		if (!Loader::getInstance()->getConfig()->get("developer-commands", false)) return;
+		$stoneState = $this->get(1, 1);
+		print $stoneState . PHP_EOL;
+		$stoneStateDefault = $this->getDefault(1);
+		print $stoneStateDefault . PHP_EOL;
+
+		foreach (
+			[
+				"minecraft:stone",
+				"minecraft:stone[]",
+				"minecraft:stone[stone_type=stone]",
+				"minecraft:stone[stone_type=granite]",
+				"minecraft:stone[stone_type=keks]",
+				"minecraft:stone[stone=stone]",
+				"minecraft:stone[stone=]",
+				"minecraft:stone[=stone]",
+				"minecraft:stone[stone_type=stone,test=foo]",
+			] as $test)
+			try {
+				$this->testSetStates(BlockQuery::fromString($test));
+			} catch (InvalidBlockStateException $e) {
+				Loader::getInstance()->getLogger()->debug($e->getMessage());
+			}
 	}
-	
-	public function getDefault(int $id):BlockState{
-	  return reset(self::$legacyStateMap[$id]);
+
+	private function testSetStates(BlockQuery $query): void
+	{
+		var_dump($query);
+		/** @var LegacyBlockIdToStringIdMap $legacyIdMap */
+		$legacyIdMap = LegacyBlockIdToStringIdMap::getInstance();
+		$id = $legacyIdMap->stringToLegacy($query->blockId);//TODO skip on null
+		$stateDefault = $this->getDefault($id);
+		$stateCompound = clone $stateDefault->state->getBlockState()->getCompoundTag("states");
+		if($query->blockStatesQuery === null){ print "Valid: " . $stateDefault;return;}
+		print $stateCompound . PHP_EOL;
+		foreach (explode(',', $query->blockStatesQuery) as $stateValuePair) {
+			[$state, $value] = explode('=', $stateValuePair);
+			if($state === "" || $value === "") throw new InvalidBlockStateException("Missing value for state pair $stateValuePair");
+			//todo get alias
+			if (($tag = $stateCompound->getTag($state)) !== null) {
+				match ($tag->getType()) {
+					NBT::TAG_String => $stateCompound->setString($state, $value),
+					NBT::TAG_Int => $stateCompound->setInt($state, (int)$value),
+					NBT::TAG_Byte => $stateCompound->setByte($state, ($value === "true" ? 1 : 0)),
+					default => throw new InvalidBlockStateException("Wrong type for state $state")
+				};
+			} else {
+				throw new InvalidBlockStateException("Unknown state $state");
+			}
+		}
+		print $stateCompound . PHP_EOL;
+
+		//finding valid states
+		/**
+		 * @var int $meta
+		 * @var BlockState $blockState
+		 */
+		foreach (self::$legacyStateMap[$id] as $meta => $blockState) {
+			if ($blockState->state->getBlockState()->getCompoundTag("states")->equals($stateCompound)) print "Valid: " . $blockState;
+		}
 	}
-	
-	public function isDefault(BlockState $state):bool{
-	  return $state->equals($this->getDefault($state->state->getId()));
+
+	public function get(int $id, int $meta = 0): BlockState
+	{
+		return self::$legacyStateMap[$id][$meta];
 	}
-	
-		public function getFromBlock(Block $block):BlockState{
-	  return $this->get($block->getId(), $block->getMeta());
+
+	public function getFullId(int $fullState): BlockState
+	{
+		return $this->get($fullState >> Block::INTERNAL_METADATA_BITS, $fullState & Block::INTERNAL_METADATA_MASK);
 	}
-	
-	public function getMergedState(BlockState $state):BlockState{
-	  $states = $this->getDefault($state->state->getId())->state->getBlockState()->merge($state->state->getBlockState());
-	  return new BlockState($this->fullId, new R12ToCurrentBlockMapEntry($id, $meta, $states));
+
+	public function getDefault(int $id): BlockState
+	{
+		return reset(self::$legacyStateMap[$id]);
+	}
+
+	public function isDefault(BlockState $state): bool
+	{
+		return $state->equals($this->getDefault($state->getId()));
+	}
+
+	public function getFromBlock(Block $block): BlockState
+	{
+		return $this->get($block->getId(), $block->getMeta());
+	}
+
+//TODO WTF REMOVE?
+	public function getMergedState(BlockState $state): BlockState
+	{
+		$states = $this->getDefault($state->getId())->state->getBlockState()->merge($state->state->getBlockState());
+		return new BlockState($state->fullId, new R12ToCurrentBlockMapEntry($state->state->getId(), $state, $states));
 	}
 
 	/**
@@ -204,37 +286,25 @@ final class BlockStatesParser
 	 * @param Block $block
 	 * @return string|null
 	 */
-	 //todo static?
-	public static function getBlockIdMapName(Block $block): ?string
+	public function getBlockIdMapName(Block $block): ?string
 	{
 		return LegacyBlockIdToStringIdMap::getInstance()->legacyToString($block->getId());
 	}
 
 	/**
-	 * @param string $blockIdentifier
-	 * @return CompoundTag
-	 * @throws UnexpectedTagTypeException
-	 */
-	 //todo static?
-	protected static function getDefaultStates(string $blockIdentifier): CompoundTag
-	{
-		return self::$legacyStateMap[$blockIdentifier][0]->getBlockState()->getCompoundTag('states') ?? new CompoundTag();
-	}
-
-	/**
 	 * Parses a BlockQuery (acquired using BlockPalette::fromString()) to a block and sets the BlockQuery's blockFullId
 	 * @param BlockQuery $query
-	 * @return Block
+	 * @return BlockState
 	 * @throws InvalidArgumentException
 	 * @throws InvalidBlockStateException
-	 * @throws UnexpectedTagTypeException
-	 * @throws \pocketmine\block\utils\InvalidBlockStateException
 	 * @throws LegacyStringToItemParserException
 	 * @throws NbtException
+	 * @throws UnexpectedTagTypeException
+	 * @throws \pocketmine\block\utils\InvalidBlockStateException
 	 * @noinspection PhpInternalEntityUsedInspection
 	 */
-	 //todo static?
-	public static function fromString(BlockQuery $query): Block
+	//todo static?
+	public function fromString(BlockQuery $query): BlockState
 	{
 		$namespacedSelectedBlockName = !str_contains($query->blockId, "minecraft:") ? "minecraft:" . $query->blockId : $query->blockId;
 		$selectedBlockName = strtolower(str_replace("minecraft:", "", $namespacedSelectedBlockName));//TODO try to keep namespace "minecraft:" to support custom blocks
@@ -243,7 +313,7 @@ final class BlockStatesParser
 		//no states, just block
 		if (!$query->hasBlockStates()) {
 			$query->blockFullId = $block->getFullId();
-			return $block;
+			return $this->getFullId($query->blockFullId);
 		}
 
 		$defaultStatesNamedTag = self::getDefaultStates($namespacedSelectedBlockName);
@@ -326,19 +396,6 @@ final class BlockStatesParser
 		}
 		$query->blockFullId = $block->getFullId();
 		return $block;
-	}
-
-	public static function getStateByBlock(Block $block): ?BlockStatesEntry
-	{
-		$name = self::getBlockIdMapName($block);
-		if ($name === null) return null;
-		$damage = $block->getMeta();
-		if(!array_key_exists($name,self::$legacyStateMap)){
-			return null;
-		}
-		$blockStates = clone self::$legacyStateMap[$name][$damage]->getBlockState()->getCompoundTag('states');
-		if ($blockStates === null) return null;
-		return new BlockStatesEntry($name, $blockStates, $block);
 	}
 
 	public static function getStateByCompound(CompoundTag $compoundTag): ?BlockStatesEntry
@@ -473,7 +530,7 @@ final class BlockStatesParser
 		];
 		foreach ($tests as $test) {
 			try {
-				Loader::getInstance()->getLogger()->debug(TF::GOLD . "Search query: " . TF::LIGHT_PURPLE . $test);
+				Server::getInstance()->getLogger()->debug(TF::GOLD . "Search query: " . TF::LIGHT_PURPLE . $test);
 				foreach (BlockPalette::fromString($test)->palette() as $block) {
 					assert($block instanceof Block);
 					$blockStatesEntry = self::getStateByBlock($block);
@@ -616,82 +673,82 @@ final class BlockStatesParser
 	 */
 	private static function generateBlockStateAliasMapJson(): void
 	{
-		Loader::getInstance()->saveResource("blockstate_alias_map.json");
-		$config = new Config(Loader::getInstance()->getDataFolder() . "blockstate_alias_map.json");
-		$config->setAll([]);
-		$config->save();
-		foreach (self::$legacyStateMap as $blockName => $v) {
-			foreach ($v as $meta => $legacyMapEntry) {
-				$states = clone $legacyMapEntry->getBlockState()->getCompoundTag('states');
-				foreach ($states as $stateName => $state) {
-					if (!$config->exists($stateName)) {
-						$alias = $stateName;
-						$fullReplace = [
-							"top" => "top",
-							"type" => "type",
-							"_age" => "age",
-							"age_" => "age",
-							"directions" => "vine_b",//hack for vine_directions => directions
-							"direction" => "direction",
-							"vine_b" => "directions",//hack for vine_directions => directions
-							"axis" => "axis",
-							"delay" => "delay",
-							"bite_counter" => "bites",
-							"count" => "count",
-							"pressed" => "pressed",
-							"upper_block" => "top",
-							"data" => "data",
-							"extinguished" => "off",
-							"color" => "color",
-							"block_light" => "light",
-							#"_lit"=>"lit",
-							#"lit_"=>"lit",
-							"liquid_depth" => "depth",
-							"upside_down" => "flipped",
-							"infiniburn" => "burn",
-						];
-						$partReplace = [
-							"_bit",
-							"piece",
-							"output_",
-							"level",
-							"amount",
-							"cauldron",
-							"allow",
-							"state",
-							"door",
-							"redstone",
-							"bamboo",
-							#"head",
-							"brewing_stand",
-							"item_frame",
-							"mushrooms",
-							"composter",
-							"coral",
-							"_2",
-							"_3",
-							"_4",
-							"end_portal",
-						];
-						foreach ($fullReplace as $stateAlias => $setTo)
-							if (str_contains($alias, $stateAlias)) {
-								$alias = $setTo;
-							}
-						foreach ($partReplace as $replace)
-							$alias = trim(trim(str_replace($replace, "", $alias), "_"));
-						$config->set($stateName, [
-							"alias" => [$alias],
-						]);
-					}
-				}
-			}
-		}
-		$all = $config->getAll();
-		/** @var array<string, mixed> $all */
-		ksort($all);
-		$config->setAll($all);
-		$config->save();
-		unset($config);
+//		Loader::getInstance()->saveResource("blockstate_alias_map.json");
+//		$config = new Config(Loader::getInstance()->getDataFolder() . "blockstate_alias_map.json");
+//		$config->setAll([]);
+//		$config->save();
+//		foreach (self::$legacyStateMap as $blockName => $v) {
+//			foreach ($v as $meta => $legacyMapEntry) {
+//				$states = clone $legacyMapEntry->getBlockState()->getCompoundTag('states');
+//				foreach ($states as $stateName => $state) {
+//					if (!$config->exists($stateName)) {
+//						$alias = $stateName;
+//						$fullReplace = [
+//							"top" => "top",
+//							"type" => "type",
+//							"_age" => "age",
+//							"age_" => "age",
+//							"directions" => "vine_b",//hack for vine_directions => directions
+//							"direction" => "direction",
+//							"vine_b" => "directions",//hack for vine_directions => directions
+//							"axis" => "axis",
+//							"delay" => "delay",
+//							"bite_counter" => "bites",
+//							"count" => "count",
+//							"pressed" => "pressed",
+//							"upper_block" => "top",
+//							"data" => "data",
+//							"extinguished" => "off",
+//							"color" => "color",
+//							"block_light" => "light",
+//							#"_lit"=>"lit",
+//							#"lit_"=>"lit",
+//							"liquid_depth" => "depth",
+//							"upside_down" => "flipped",
+//							"infiniburn" => "burn",
+//						];
+//						$partReplace = [
+//							"_bit",
+//							"piece",
+//							"output_",
+//							"level",
+//							"amount",
+//							"cauldron",
+//							"allow",
+//							"state",
+//							"door",
+//							"redstone",
+//							"bamboo",
+//							#"head",
+//							"brewing_stand",
+//							"item_frame",
+//							"mushrooms",
+//							"composter",
+//							"coral",
+//							"_2",
+//							"_3",
+//							"_4",
+//							"end_portal",
+//						];
+//						foreach ($fullReplace as $stateAlias => $setTo)
+//							if (str_contains($alias, $stateAlias)) {
+//								$alias = $setTo;
+//							}
+//						foreach ($partReplace as $replace)
+//							$alias = trim(trim(str_replace($replace, "", $alias), "_"));
+//						$config->set($stateName, [
+//							"alias" => [$alias],
+//						]);
+//					}
+//				}
+//			}
+//		}
+//		$all = $config->getAll();
+//		/** @var array<string, mixed> $all */
+//		ksort($all);
+//		$config->setAll($all);
+//		$config->save();
+//		unset($config);
 	}
 
 	/**
@@ -703,32 +760,32 @@ final class BlockStatesParser
 	 */
 	public static function generatePossibleStatesJson(): void
 	{
-		$config = new Config(Loader::getInstance()->getDataFolder() . "possible_blockstates.json");
-		$config->setAll([]);
-		$config->save();
-		$all = [];
-		foreach (self::$legacyStateMap as $blockName => $v) {
-			foreach ($v as $meta => $legacyMapEntry) {
-				$states = clone $legacyMapEntry->getBlockState()->getCompoundTag('states');
-				foreach ($states as $stateName => $state) {
-					if (!array_key_exists($stateName, $all)) {
-						$all[(string)$stateName] = [];
-					}
-					if (!in_array($state->getValue(), $all[$stateName], true)) {
-						$all[(string)$stateName][] = $state->getValue();
-						if (str_contains($stateName, "_bit")) {
-							var_dump("_bit");
-						} else {
-							var_dump("no _bit");
-						}
-					}
-				}
-			}
-		}
-		ksort($all);
-		$config->setAll($all);
-		$config->save();
-		unset($config);
+//		$config = new Config(Loader::getInstance()->getDataFolder() . "possible_blockstates.json");
+//		$config->setAll([]);
+//		$config->save();
+//		$all = [];
+//		foreach (self::$legacyStateMap as $blockName => $v) {
+//			foreach ($v as $meta => $legacyMapEntry) {
+//				$states = clone $legacyMapEntry->getBlockState()->getCompoundTag('states');
+//				foreach ($states as $stateName => $state) {
+//					if (!array_key_exists($stateName, $all)) {
+//						$all[(string)$stateName] = [];
+//					}
+//					if (!in_array($state->getValue(), $all[$stateName], true)) {
+//						$all[(string)$stateName][] = $state->getValue();
+//						if (str_contains($stateName, "_bit")) {
+//							var_dump("_bit");
+//						} else {
+//							var_dump("no _bit");
+//						}
+//					}
+//				}
+//			}
+//		}
+//		ksort($all);
+//		$config->setAll($all);
+//		$config->save();
+//		unset($config);
 	}
 
 	/**
