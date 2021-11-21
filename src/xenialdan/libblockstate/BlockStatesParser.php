@@ -16,6 +16,7 @@ use pocketmine\block\utils\InvalidBlockStateException;
 use pocketmine\data\bedrock\LegacyBlockIdToStringIdMap;
 use pocketmine\math\Facing;
 use pocketmine\nbt\NBT;
+use pocketmine\nbt\NoSuchTagException;
 use pocketmine\nbt\tag\ByteTag;
 use pocketmine\nbt\tag\CompoundTag;
 use pocketmine\nbt\tag\IntTag;
@@ -208,9 +209,6 @@ final class BlockStatesParser
 		if ($stateCompound->equals($stateDefault->state->getBlockState()->getTag("states"))) {
 			return $stateDefault;
 		}
-		/**
-		 * @var BlockState $blockState
-		 */
 		foreach (self::$legacyStateMap[$id] as $blockState) {
 			if ($stateCompound->equals($blockState->state->getBlockState()->getCompoundTag("states"))) return $blockState;
 		}
@@ -246,6 +244,23 @@ final class BlockStatesParser
 	public function getFromBlock(Block $block): BlockState
 	{
 		return $this->get($block->getId(), $block->getMeta());
+	}
+
+	public function getFromCompound(CompoundTag $tag): BlockState
+	{
+		/** @var LegacyBlockIdToStringIdMap $legacyIdMap */
+		$legacyIdMap = LegacyBlockIdToStringIdMap::getInstance();
+		try {
+			$blockIdentifier = $tag->getString("name");
+			$states = $tag->getCompoundTag("states");
+			$id = $legacyIdMap->stringToLegacy($blockIdentifier);
+			foreach (self::$legacyStateMap[$id] as $blockState){
+				if($blockState->state->getBlockState()->getCompoundTag("states")->equals($states)) return $blockState;
+			}
+		}catch (NoSuchTagException $e){
+			throw new BlockQueryParsingFailedException("Required tag not found. ".$e->getMessage());
+		}
+		throw new BlockQueryParsingFailedException("No matching blocks found for $id $states");
 	}
 
 	/**
