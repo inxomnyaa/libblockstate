@@ -1,4 +1,4 @@
-<?php /** @noinspection PhpInternalEntityUsedInspection */
+<?php
 
 declare(strict_types=1);
 
@@ -59,6 +59,7 @@ class BlockEntry
 	public static function fromBlock(Block $block): self
 	{
 		BlockFactory::getInstance();
+		/** @noinspection PhpInternalEntityUsedInspection */
 		return new BlockEntry($block->getFullId());//todo states
 	}
 

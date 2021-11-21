@@ -6,11 +6,11 @@ namespace xenialdan\libblockstate;
 
 use pocketmine\block\Block;
 use pocketmine\block\BlockFactory;
+use pocketmine\block\utils\InvalidBlockStateException;
 use pocketmine\nbt\tag\ByteTag;
 use pocketmine\nbt\tag\IntTag;
 use pocketmine\nbt\tag\StringTag;
 use pocketmine\network\mcpe\convert\R12ToCurrentBlockMapEntry;
-use xenialdan\libblockstate\exception\InvalidBlockStateException;
 use function count;
 use function get_class;
 use function implode;
@@ -34,6 +34,11 @@ class BlockState
 	public function getBlock(): Block
 	{
 		return BlockFactory::getInstance()->fromFullBlock($this->fullId);
+	}
+
+	public function getFullId(): int
+	{
+		return $this->fullId;
 	}
 
 	public function getId():int{
