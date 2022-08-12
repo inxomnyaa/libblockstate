@@ -67,7 +67,7 @@ final class BlockQuery
 		$extraMatch += [null, null];
 		[[$fullBlockQuery, $blockId, $blockStatesQuery], [$fullExtraQuery, $weight]] = [$blockMatch, $extraMatch];
 		if($blockStatesQuery === "") $blockStatesQuery = null;
-		return (new self($query, $fullBlockQuery, $blockId, $blockStatesQuery, $fullExtraQuery, $weight))->parse();
+		return (new self($query, $fullBlockQuery, $blockId, $blockStatesQuery, $fullExtraQuery, (float) $weight))->parse();
 	}
 
 	public function hasBlockStates(): bool
