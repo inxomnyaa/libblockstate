@@ -43,27 +43,6 @@ class BlockState{
 	}
 
 	/**
-	 * @param string $stateName
-	 * @param mixed  $newValue
-	 *
-	 * @return BlockState
-	 * @throws UnexpectedTagTypeException|BlockQueryParsingFailedException
-	 */
-	public function replaceBlockStateValue(string $stateName, mixed $newValue) : BlockState{
-		/** @var BlockStatesParser $blockStatesParser */
-		$blockStatesParser = BlockStatesParser::getInstance();
-		$newBlockStateCompound = clone $this->state->getBlockState();
-		$blockStateTag = $newBlockStateCompound->getCompoundTag("states")->getTag($stateName);
-		match (true) {
-			$blockStateTag instanceof StringTag => $newBlockStateCompound->getCompoundTag("states")->setString($stateName, (string) $newValue),
-			$blockStateTag instanceof IntTag => $newBlockStateCompound->getCompoundTag("states")->setInt($stateName, (int) $newValue),
-			$blockStateTag instanceof ByteTag => $newBlockStateCompound->getCompoundTag("states")->setByte($stateName, (int) $newValue),
-			default => throw new UnexpectedTagTypeException("Unexpected tag type")
-		};
-		return $blockStatesParser->getFromCompound($newBlockStateCompound);
-	}
-
-	/**
 	 * @param array $states Keys are state names, values are new values
 	 *
 	 * @return BlockState
